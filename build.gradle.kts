@@ -20,7 +20,17 @@ dependencies {
 
     implementation(ktorLibs.client.core)
     implementation(ktorLibs.client.cio)
+    implementation(libs.playwright)
+    implementation(libs.kotlinx.serialization.json)
 
     testImplementation(kotlin("test"))
     testImplementation(ktorLibs.server.testHost)
+}
+
+tasks.register<JavaExec>("playwrightInstall") {
+    group = "playwright"
+    description = "Installs Chromium used by Playwright"
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass = "com.microsoft.playwright.CLI"
+    args("install", "chromium")
 }
