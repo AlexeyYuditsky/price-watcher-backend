@@ -1,5 +1,6 @@
 package alexeyyuditsky.ozon
 
+import alexeyyuditsky.ozon.model.BrowserPage
 import com.microsoft.playwright.Page
 import com.microsoft.playwright.Playwright
 import com.microsoft.playwright.PlaywrightException
@@ -12,8 +13,7 @@ class OzonBrowserClient {
     suspend fun loadProductPage(url: String): BrowserPage = withContext(Dispatchers.IO) {
         Playwright.create().use { playwright ->
             playwright.chromium().connectOverCDP(CDP_ENDPOINT).use { browser ->
-                val context = browser.contexts().firstOrNull()
-                    ?: error("Chrome did not provide a browser context")
+                val context = browser.contexts().firstOrNull() ?: error("Chrome did not provide a browser context")
                 val page = context.pages().firstOrNull() ?: context.newPage()
                 val productId = extractOzonProductId(url)
                 var documentStatus: Int? = null
