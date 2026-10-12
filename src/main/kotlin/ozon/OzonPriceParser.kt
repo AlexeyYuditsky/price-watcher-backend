@@ -1,5 +1,6 @@
 package alexeyyuditsky.ozon
 
+import alexeyyuditsky.ozon.model.ProductPrice
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -37,8 +38,7 @@ class OzonPriceParser(
     }
 
     private fun parseBankAmount(html: String): BigDecimal? {
-        val encodedState = PRICE_STATE_REGEX.find(html)?.groupValues?.get(1)
-            ?: return null
+        val encodedState = PRICE_STATE_REGEX.find(html)?.groupValues?.get(1) ?: return null
         val state = json.parseToJsonElement(encodedState.decodeHtmlAttribute()) as? JsonObject
             ?: error("Ozon price state is not a JSON object")
 

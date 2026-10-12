@@ -1,4 +1,4 @@
-package alexeyyuditsky.ozon
+package alexeyyuditsky.ozon.model
 
 data class BrowserPage(
     val url: String,

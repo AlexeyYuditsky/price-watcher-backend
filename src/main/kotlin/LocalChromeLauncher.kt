@@ -14,12 +14,9 @@ import kotlin.time.Duration.Companion.milliseconds
 class LocalChromeLauncher {
 
     suspend fun ensureStarted() {
-        if (isCdpAvailable()) {
-            return
-        }
+        if (isCdpAvailable()) return
 
-        val chrome = findChrome()
-            ?: error("Google Chrome was not found on this computer")
+        val chrome = findChrome() ?: error("Google Chrome was not found on this computer")
         val profile = File("files/ozon-cdp-profile").absoluteFile
         profile.mkdirs()
 
@@ -35,9 +32,7 @@ class LocalChromeLauncher {
         }
 
         repeat(CDP_START_ATTEMPTS) {
-            if (isCdpAvailable()) {
-                return
-            }
+            if (isCdpAvailable()) return
             delay(CDP_RETRY_DELAY_MS.milliseconds)
         }
 
@@ -55,22 +50,18 @@ class LocalChromeLauncher {
         }.getOrDefault(false)
     }
 
-    private fun findChrome(): File? = chromeCandidates()
-        .firstOrNull(File::isFile)
-
-    private fun chromeCandidates(): Sequence<File> = sequenceOf(
+    private fun findChrome(): File? = sequenceOf(
         System.getenv("PROGRAMFILES"),
         System.getenv("PROGRAMFILES(X86)"),
         System.getenv("LOCALAPPDATA")
     ).filterNotNull()
         .map { File(it, "Google/Chrome/Application/chrome.exe") }
+        .firstOrNull(File::isFile)
 
     private companion object {
         val CDP_VERSION_URI: URI = URI("http://127.0.0.1:9222/json/version")
         val CDP_REQUEST_TIMEOUT: Duration = Duration.ofSeconds(1)
-        val httpClient: HttpClient = HttpClient.newBuilder()
-            .connectTimeout(CDP_REQUEST_TIMEOUT)
-            .build()
+        val httpClient: HttpClient = HttpClient.newBuilder().connectTimeout(CDP_REQUEST_TIMEOUT).build()
         const val CDP_START_ATTEMPTS = 40
         const val CDP_RETRY_DELAY_MS = 250L
     }
