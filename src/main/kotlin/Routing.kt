@@ -3,6 +3,7 @@ package alexeyyuditsky
 import alexeyyuditsky.ozon.extractOzonProductId
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
+import io.ktor.server.application.ApplicationStopped
 import io.ktor.server.application.Application
 import io.ktor.server.application.log
 import io.ktor.server.request.receiveText
@@ -22,6 +23,7 @@ import java.time.Instant
 
 fun Application.configureRouting() {
     val priceWatcher = LocalPriceWatcher()
+    monitor.subscribe(ApplicationStopped) { priceWatcher.close() }
 
     routing {
         post("/products/price") {
