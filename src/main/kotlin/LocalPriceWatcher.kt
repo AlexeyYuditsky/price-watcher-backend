@@ -2,7 +2,7 @@ package alexeyyuditsky
 
 import alexeyyuditsky.ozon.OzonBrowserClient
 import alexeyyuditsky.ozon.OzonPriceParser
-import alexeyyuditsky.ozon.extractOzonProductId
+import alexeyyuditsky.ozon.parseOzonProductUrl
 import alexeyyuditsky.ozon.model.ProductPrice
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
@@ -36,7 +36,14 @@ class LocalPriceWatcher(
                 check(page.isSuccessful) { "Ozon product page loading failed" }
                 val parsing = TimeSource.Monotonic.markNow()
                 val price = priceParser.parse(page.html)
-                check(price.productId == extractOzonProductId(url)) { "Unexpected product ID" }
+                val requestedProductId = parseOzonProductUrl(url).productId
+                val resolvedProductId = checkNotNull(parseOzonProductUrl(page.url).productId) {
+                    "Ozon URL did not resolve to a product"
+                }
+                check(price.productId == resolvedProductId) { "Unexpected product ID" }
+                check(requestedProductId == null || price.productId == requestedProductId) {
+                    "Ozon redirected to a different product"
+                }
                 logger.info("Ozon product={} parseMs={}", price.productId, parsing.elapsedNow().inWholeMilliseconds)
                 price
             }
