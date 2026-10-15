@@ -1,6 +1,6 @@
 package alexeyyuditsky
 
-import alexeyyuditsky.ozon.extractOzonProductId
+import alexeyyuditsky.ozon.parseOzonProductUrl
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.ApplicationStopped
@@ -18,7 +18,6 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.put
-import java.net.URI
 import java.time.Instant
 
 fun Application.configureRouting() {
@@ -33,15 +32,7 @@ fun Application.configureRouting() {
                     ?.takeIf { it.isString }?.contentOrNull
                     ?.trim()?.takeIf { it.isNotEmpty() }
                     ?: throw IllegalArgumentException("JSON body must contain a non-empty url string")
-                val uri = URI(value)
-                require(
-                    uri.scheme.equals("https", ignoreCase = true) &&
-                        uri.host?.lowercase() in setOf("ozon.ru", "www.ozon.ru") &&
-                        uri.port in setOf(-1, 443) && uri.rawUserInfo == null &&
-                        uri.path.startsWith("/product/")
-                ) { "Expected an HTTPS Ozon product URL" }
-                extractOzonProductId(uri.path)
-                value
+                parseOzonProductUrl(value).url
             } catch (error: Exception) {
                 if (error is CancellationException) throw error
                 call.respondText(

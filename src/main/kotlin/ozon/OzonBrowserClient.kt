@@ -26,7 +26,7 @@ class OzonBrowserClient : AutoCloseable {
     private val logger = LoggerFactory.getLogger(OzonBrowserClient::class.java)
 
     suspend fun loadProductPage(url: String): BrowserPage = withContext(dispatcher) {
-        val productId = extractOzonProductId(url)
+        val productId = parseOzonProductUrl(url).productId
         val total = TimeSource.Monotonic.markNow()
         try {
             val connection = TimeSource.Monotonic.markNow()
@@ -66,8 +66,12 @@ class OzonBrowserClient : AutoCloseable {
                 val ready = TimeSource.Monotonic.markNow()
                 productPage.waitForCondition(
                     {
-                        runCatching { parser.parse(productPage.content()).productId == productId }
-                            .getOrDefault(false)
+                        runCatching {
+                            val resolvedProductId = parseOzonProductUrl(productPage.url()).productId
+                            resolvedProductId != null &&
+                                (productId == null || resolvedProductId == productId) &&
+                                parser.parse(productPage.content()).productId == resolvedProductId
+                        }.getOrDefault(false)
                     },
                     Page.WaitForConditionOptions().setTimeout(60_000.0)
                 )
