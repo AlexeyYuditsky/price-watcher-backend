@@ -1,36 +1,25 @@
 plugins {
-    alias(libs.plugins.kotlin.jvm)
-    alias(ktorLibs.plugins.ktor)
+    id("pricewatcher.kotlin-jvm") apply false
+    alias(ktorLibs.plugins.ktor) apply false
+    base
 }
 
-group = "alexeyyuditsky"
-version = "1.0.0-SNAPSHOT"
-
-application {
-    mainClass = "alexeyyuditsky.MainKt"
+// Keep the existing commands and deployment output paths at the project root.
+listOf("run", "installDist", "distZip", "distTar", "playwrightInstall").forEach { taskName ->
+    tasks.register(taskName) {
+        group = if (taskName == "run") "application" else "distribution"
+        dependsOn(":app:$taskName")
+    }
 }
 
-kotlin {
-    jvmToolchain(21)
-}
-dependencies {
-    implementation(ktorLibs.server.core)
-    implementation(ktorLibs.server.netty)
-    implementation(libs.logback.classic)
-
-    implementation(ktorLibs.client.core)
-    implementation(ktorLibs.client.cio)
-    implementation(libs.playwright)
-    implementation(libs.kotlinx.serialization.json)
-
-    testImplementation(kotlin("test"))
-    testImplementation(ktorLibs.server.testHost)
+tasks.named("build") {
+    dependsOn(":app:build")
 }
 
-tasks.register<JavaExec>("playwrightInstall") {
-    group = "playwright"
-    description = "Installs Chromium used by Playwright"
-    classpath = sourceSets["main"].runtimeClasspath
-    mainClass = "com.microsoft.playwright.CLI"
-    args("install", "chromium")
+tasks.named("check") {
+    dependsOn(":app:check", ":core:browser:check", ":core:products:check", ":feature:ozon:check")
+}
+
+tasks.named("clean") {
+    dependsOn(":app:clean", ":core:browser:clean", ":core:products:clean", ":feature:ozon:clean")
 }
