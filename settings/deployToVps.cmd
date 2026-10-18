@@ -20,7 +20,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$projectDirectory = Split-Path -Parent $env:PRICE_WATCHER_DEPLOY_FILE
+$projectDirectory = Split-Path -Parent (Split-Path -Parent $env:PRICE_WATCHER_DEPLOY_FILE)
 $serverScript = @'
 #!/usr/bin/env bash
 set -Eeuo pipefail
@@ -269,11 +269,12 @@ try {
     $shellFile = Join-Path $secretDirectory 'deploy-vps.sh'
     $shellText = $serverScript.Replace("`r`n", "`n").TrimEnd([char[]]"`r`n")
     [System.IO.File]::WriteAllText($shellFile, $shellText, [System.Text.UTF8Encoding]::new($false))
-    Invoke-Remote "umask 077; cat > '$remoteScript'" $shellFile
 
     Write-Host '[3/4] Checking the server and switching the release...'
     $mode = if ($CheckOnly) { 'check' } else { 'deploy' }
-    Invoke-Remote "bash -n '$remoteScript' && bash '$remoteScript' '$remoteArchive' '$checksum' '$mode' '$expectedVersion'"
+    $installCommand = "umask 077; cat > '$remoteScript' && bash -n '$remoteScript' && " +
+        "bash '$remoteScript' '$remoteArchive' '$checksum' '$mode' '$expectedVersion'"
+    Invoke-Remote $installCommand $shellFile
     Write-Host '[4/4] Finished.'
     $exitCode = 0
 } catch {
