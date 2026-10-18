@@ -8,6 +8,7 @@ import io.ktor.server.application.Application
 import io.ktor.server.application.log
 import io.ktor.server.request.receiveText
 import io.ktor.server.response.respondText
+import io.ktor.server.routing.get
 import io.ktor.server.routing.post
 import io.ktor.server.routing.routing
 import kotlinx.coroutines.CancellationException
@@ -19,10 +20,22 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.put
 import java.time.Instant
+import java.util.Properties
 
 fun Application.configureRouting(priceWatcher: ProductPriceSource) {
-
     routing {
+        get("/version") {
+            val version = Properties().apply {
+                Application::class.java.getResourceAsStream("/gradle.properties").use(::load)
+            }.getProperty("backendVersion")
+            call.respondText(
+                buildJsonObject {
+                    put("version", version)
+                }.toString(),
+                ContentType.Application.Json
+            )
+        }
+
         post("/products/price") {
             val url = try {
                 val body = Json.parseToJsonElement(call.receiveText()) as? JsonObject

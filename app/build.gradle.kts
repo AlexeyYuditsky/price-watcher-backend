@@ -1,7 +1,7 @@
 import org.gradle.api.tasks.bundling.AbstractArchiveTask
 
 plugins {
-    id("pricewatcher.kotlin-jvm")
+    alias(libs.plugins.pricewatcher.kotlin.jvm)
     alias(ktorLibs.plugins.ktor)
 }
 
@@ -11,22 +11,22 @@ application {
 }
 
 dependencies {
-    implementation(project(":feature:ozon"))
-    implementation(project(":core:browser"))
-    implementation(project(":core:products"))
+    implementation(projects.feature.ozon)
+    implementation(projects.core.browser)
+    implementation(projects.core.products)
     implementation(ktorLibs.server.core)
     implementation(ktorLibs.server.netty)
     implementation(libs.logback.classic)
     implementation(libs.kotlinx.serialization.json)
 }
 
-tasks.named<JavaExec>("run") {
+tasks.run {
     workingDir = rootProject.projectDir
     providers.gradleProperty("backend").orNull?.let { environment("BACKEND_PROFILE", it) }
     providers.gradleProperty("port").orNull?.let { environment("PORT", it) }
 }
 
-tasks.named<Sync>("installDist") {
+tasks.installDist {
     into(rootProject.layout.buildDirectory.dir("install/price-watcher"))
 }
 
@@ -40,7 +40,11 @@ tasks.withType<AbstractArchiveTask>().configureEach {
 tasks.register<JavaExec>("playwrightInstall") {
     group = "playwright"
     description = "Installs Chromium used by Playwright"
-    classpath = sourceSets["main"].runtimeClasspath
+    classpath = sourceSets.main.get().runtimeClasspath
     mainClass = "com.microsoft.playwright.CLI"
     args("install", "chromium")
+}
+
+tasks.processResources {
+    from(rootProject.layout.projectDirectory.file("gradle.properties"))
 }

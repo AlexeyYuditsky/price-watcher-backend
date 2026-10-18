@@ -1,5 +1,5 @@
 plugins {
-    id("pricewatcher.kotlin-jvm") apply false
+    alias(libs.plugins.pricewatcher.kotlin.jvm) apply false
     alias(ktorLibs.plugins.ktor) apply false
     base
 }
@@ -12,14 +12,14 @@ listOf("run", "installDist", "distZip", "distTar", "playwrightInstall").forEach 
     }
 }
 
-tasks.named("build") {
+tasks.build {
     dependsOn(":app:build")
 }
 
-tasks.named("check") {
+tasks.check {
     dependsOn(":app:check", ":core:browser:check", ":core:products:check", ":feature:ozon:check")
 }
 
-tasks.named("clean") {
+tasks.clean {
     dependsOn(":app:clean", ":core:browser:clean", ":core:products:clean", ":feature:ozon:clean")
 }

@@ -1,3 +1,3 @@
 plugins {
-    id("pricewatcher.kotlin-jvm")
+    alias(libs.plugins.pricewatcher.kotlin.jvm)
 }
