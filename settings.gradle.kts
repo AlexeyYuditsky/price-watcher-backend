@@ -23,4 +23,4 @@ enableFeaturePreview("TYPESAFE_PROJECT_ACCESSORS")
 
 rootProject.name = "price-watcher"
 
-include(":app", ":core:browser", ":core:products", ":feature:ozon")
+include(":app", ":core:browser", ":core:database", ":core:products", ":feature:ozon", ":feature:auth")

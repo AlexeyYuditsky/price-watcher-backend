@@ -11,7 +11,10 @@ application {
 }
 
 dependencies {
+    implementation(projects.feature.auth)
+    implementation(libs.kotlinx.coroutines.core)
     implementation(projects.feature.ozon)
+    implementation(projects.core.database)
     implementation(projects.core.browser)
     implementation(projects.core.products)
     implementation(ktorLibs.server.core)
@@ -47,4 +50,14 @@ tasks.register<JavaExec>("playwrightInstall") {
 
 tasks.processResources {
     from(rootProject.layout.projectDirectory.file("gradle.properties"))
+}
+
+tasks.register<JavaExec>("migrateDatabase") {
+    group = "database"
+    description = "Applies pending migrations to the configured PostgreSQL database"
+    classpath = sourceSets.main.get().runtimeClasspath
+    mainClass = "alexeyyuditsky.MainKt"
+    args("--migrate")
+    workingDir = rootProject.projectDir
+    providers.gradleProperty("backend").orNull?.let { environment("BACKEND_PROFILE", it) }
 }

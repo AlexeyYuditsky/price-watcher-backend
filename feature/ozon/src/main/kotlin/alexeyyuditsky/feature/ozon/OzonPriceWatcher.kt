@@ -50,5 +50,12 @@ class OzonPriceWatcher(
         }
     }
 
+    suspend fun ensureBrowserReady() {
+        mutex.withLock {
+            val chromeStarted = withContext(Dispatchers.IO) { chromeLauncher.ensureStarted() }
+            if (chromeStarted) browserClient.resetConnection()
+        }
+    }
+
     override fun close() = browserClient.close()
 }

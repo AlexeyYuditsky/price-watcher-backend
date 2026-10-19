@@ -5,6 +5,10 @@ playwright = "1.62.0"
 kotlinx-serialization = "1.11.0"
 coroutines = "1.11.0"
 slf4j = "2.0.18"
+flyway = "13.10.3"
+postgresql = "42.7.14"
+
+hikari = "7.1.0"
 
 [libraries]
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
@@ -13,6 +17,11 @@ kotlin-gradle-plugin = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin", v
 logback-classic = { module = "ch.qos.logback:logback-classic", version.ref = "logback" }
 playwright = { module = "com.microsoft.playwright:playwright", version.ref = "playwright" }
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinx-serialization" }
+flyway-core = { module = "org.flywaydb:flyway-core", version.ref = "flyway" }
+flyway-postgresql = { module = "org.flywaydb:flyway-database-postgresql", version.ref = "flyway" }
+postgresql = { module = "org.postgresql:postgresql", version.ref = "postgresql" }
+
+hikari = { module = "com.zaxxer:HikariCP", version.ref = "hikari" }
 
 [plugins]
 pricewatcher-kotlin-jvm = { id = "pricewatcher.kotlin-jvm" }

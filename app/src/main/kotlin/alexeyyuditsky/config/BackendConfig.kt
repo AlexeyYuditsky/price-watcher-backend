@@ -7,7 +7,8 @@ data class BackendConfig(
     val profile: String,
     val host: String,
     val port: Int,
-    val chromeProfile: File
+    val chromeProfile: File,
+    val trustedProxies: Set<String> = emptySet()
 ) {
     companion object {
         fun load(environment: Map<String, String> = System.getenv()): BackendConfig {
@@ -34,7 +35,13 @@ data class BackendConfig(
                 profile = profile,
                 host = environment["HOST"] ?: properties.getProperty("server.host"),
                 port = port,
-                chromeProfile = chromeProfile
+                chromeProfile = chromeProfile,
+                trustedProxies = (environment["TRUSTED_PROXIES"]
+                    ?: properties.getProperty("server.trusted-proxies", ""))
+                    .split(",")
+                    .map(String::trim)
+                    .filter(String::isNotEmpty)
+                    .toSet()
             )
         }
     }

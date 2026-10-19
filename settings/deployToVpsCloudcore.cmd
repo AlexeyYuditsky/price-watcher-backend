@@ -15,7 +15,7 @@ exit /b %DEPLOY_EXIT%
 # POWERSHELL_PAYLOAD
 param(
     [switch]$CheckOnly,
-    [string]$ConnectionFile = (Join-Path $env:USERPROFILE 'Desktop\vps.cmd'),
+    [string]$ConnectionFile = (Join-Path $env:USERPROFILE 'Desktop\vpsCloudcore.cmd'),
     [string]$PlinkPath = 'C:\Program Files (x86)\pink\plink.exe'
 )
 
@@ -122,18 +122,31 @@ running_version=$(curl -fsS --max-time 5 http://127.0.0.1:8080/version)
     exit 1
 }
 echo "Version verified: $running_version"
-echo 'Checking a real Ozon price request...'
+echo 'Checking backend health (database and browser)...'
+health=$(curl -sS --max-time 40 -w ' HTTP %{http_code}' http://127.0.0.1:8080/health || true)
+[[ $health == *'"status":"ok"'*' HTTP 200' ]] || { echo "Health check failed: $health" >&2; exit 1; }
+echo "Health OK: ${health% HTTP 200}"
+
+echo 'Checking a real Ozon price request (warning only)...'
 response_file=$upload_dir/price-response-${checksum:0:8}.json
-code=$(curl -sS --max-time 150 -o "$response_file" -w '%{http_code}' \
-    -H 'Content-Type: application/json' \
-    --data '{"url":"https://www.ozon.ru/product/ryukzak-5677073262/"}' \
-    http://127.0.0.1:8080/products/price)
-[[ $code == 200 ]] && grep -Eq '"amount"[[:space:]]*:' "$response_file" || {
-    echo "Price check failed: HTTP $code" >&2
-    cat "$response_file" >&2
-    exit 1
-}
-echo "Price check OK: $(cat "$response_file")"
+price_ok=0
+for attempt in 1 2 3; do
+    code=$(curl -sS --max-time 150 -o "$response_file" -w '%{http_code}' \
+        -H 'Content-Type: application/json' \
+        --data '{"url":"https://www.ozon.ru/product/ryukzak-5677073262/"}' \
+        http://127.0.0.1:8080/products/price || true)
+    if [[ $code == 200 ]] && grep -Eq '"amount"[[:space:]]*:' "$response_file"; then
+        price_ok=1
+        break
+    fi
+    echo "Price check attempt $attempt failed: HTTP $code" >&2
+    (( attempt < 3 )) && sleep 15
+done
+if (( price_ok )); then
+    echo "Price check OK: $(cat "$response_file")"
+else
+    echo 'WARNING: the backend is healthy, but the Ozon price request failed. Keeping the new release; check Ozon via VNC.' >&2
+fi
 systemctl is-active --quiet "$service"
 systemctl show "$service" -p ActiveState -p MainPID
 # The release is committed: cleanup failures must not trigger rollback.
@@ -172,6 +185,9 @@ function Read-ConnectionLiteral([string]$text, [string]$name) {
     if (-not $match.Success) { throw "Missing $name in the local connection file." }
     return $match.Groups[1].Value.Replace("''", "'")
 }
+
+# A UTF-8 console makes .NET prefix redirected stdin with a BOM, which breaks the remote shell script.
+[Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false)
 
 function Invoke-Remote([string]$command, [string]$inputFile = '') {
     $commandFile = Join-Path $secretDirectory 'remote-command.txt'
