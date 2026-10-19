@@ -56,6 +56,10 @@ while IFS= read -r entry; do
     [[ $entry != /* && /$entry/ != */../* ]] || exit 1
 done < <(tar -tzf "$archive")
 
+upload_id=${archive##*/}
+upload_id=${upload_id%.tar.gz}
+find "$upload_dir" -mindepth 1 -maxdepth 1 -type f ! -name "$upload_id.*" ! -name "price-response-${checksum:0:8}.json" -delete
+
 echo 'Preflight OK: checksum, service, paths and archive.'
 if [[ $mode == check ]]; then
     echo 'Check-only mode: the running service was not changed.'
@@ -151,11 +155,12 @@ systemctl is-active --quiet "$service"
 systemctl show "$service" -p ActiveState -p MainPID
 # The release is committed: cleanup failures must not trigger rollback.
 trap - EXIT
-echo 'Deployment successful. Removing previous release backups...'
+echo 'Deployment successful. Removing uploaded files and previous release backups...'
+rm -f -- "$upload_dir/$upload_id".* "$response_file"
 parent_path=$(realpath -e -- "$parent")
 while IFS= read -r -d '' old_backup; do
     backup_name=${old_backup##*/}
-    if [[ ! $backup_name =~ ^price-watcher-backup-[0-9]{8}(-[0-9]{6}|T[0-9]{6}Z-[a-f0-9]{8})$ ]]; then
+    if [[ ! $backup_name =~ ^price-watcher-(backup|failed)-[0-9]{8}(-[0-9]{6}|T[0-9]{6}Z-[a-f0-9]{8})$ ]]; then
         echo "Skipping unrecognized backup directory: $old_backup" >&2
         continue
     fi
@@ -173,7 +178,7 @@ while IFS= read -r -d '' old_backup; do
     else
         echo "Warning: could not completely remove backup: $backup_path" >&2
     fi
-done < <(find "$parent" -mindepth 1 -maxdepth 1 -type d -name 'price-watcher-backup-*' -print0)
+done < <(find "$parent" -mindepth 1 -maxdepth 1 -type d \( -name 'price-watcher-backup-*' -o -name 'price-watcher-failed-*' \) -print0)
 '@
 
 $secretDirectory = $null

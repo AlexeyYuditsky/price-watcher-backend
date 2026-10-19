@@ -48,7 +48,7 @@ internal class AuthHttpHandler(
                 respondError(call, HttpStatusCode.RequestTimeout, "Request body read timed out")
                 return
             }
-            if (!concurrent.tryAcquire()) {
+            if (withTimeoutOrNull(10_000) { concurrent.acquire() } == null) {
                 tooManyRequests(call)
                 return
             }
