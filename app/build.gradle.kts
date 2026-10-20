@@ -12,6 +12,7 @@ application {
 
 dependencies {
     implementation(projects.feature.auth)
+    implementation(projects.feature.tracking)
     implementation(libs.kotlinx.coroutines.core)
     implementation(projects.feature.ozon)
     implementation(projects.core.database)

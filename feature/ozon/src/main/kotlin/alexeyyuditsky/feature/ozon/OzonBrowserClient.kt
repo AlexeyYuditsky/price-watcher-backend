@@ -14,6 +14,7 @@ class OzonBrowserClient(
             val resolvedProductId = parseOzonProductUrl(resolvedUrl).productId
             resolvedProductId != null &&
                 (productId == null || resolvedProductId == productId) &&
+                parser.hasPriceWidget(html) &&
                 parser.parse(html).productId == resolvedProductId
         }
     }

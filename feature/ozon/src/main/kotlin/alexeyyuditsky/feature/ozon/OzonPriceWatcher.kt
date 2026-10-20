@@ -27,11 +27,9 @@ class OzonPriceWatcher(
                 val chromeStarted = withContext(Dispatchers.IO) { chromeLauncher.ensureStarted() }
                 if (chromeStarted) browserClient.resetConnection()
                 logger.info("Chrome startupMs={}", startup.elapsedNow().inWholeMilliseconds)
+                // The page is accepted only after its product JSON matches the requested product,
+                // so a title left over from the anti-bot check must not fail the request.
                 val page = browserClient.loadProductPage(url)
-                check(
-                    page.title.isNotBlank() &&
-                        !page.title.startsWith("Loading ") && page.title != "Antibot Challenge Page"
-                ) { "Ozon product page loading failed" }
                 val parsing = TimeSource.Monotonic.markNow()
                 val price = priceParser.parse(page.html)
                 val requestedProductId = parseOzonProductUrl(url).productId

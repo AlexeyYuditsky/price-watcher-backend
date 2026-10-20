@@ -1,0 +1,22 @@
+package alexeyyuditsky.feature.tracking.data
+
+import alexeyyuditsky.feature.tracking.domain.PricePoint
+import alexeyyuditsky.feature.tracking.domain.TrackedProduct
+import java.sql.ResultSet
+import java.util.UUID
+
+internal class TrackingRowMapper {
+    fun trackedProduct(row: ResultSet): TrackedProduct = TrackedProduct(
+        id = row.getObject("id", UUID::class.java),
+        url = row.getString("url"),
+        title = row.getString("title"),
+        imageUrl = row.getString("image_url"),
+        latestPrice = row.getTimestamp("checked_at")?.let { pricePoint(row) }
+    )
+
+    fun pricePoint(row: ResultSet): PricePoint = PricePoint(
+        checkedAt = row.getTimestamp("checked_at").toInstant(),
+        amount = row.getBigDecimal("amount"),
+        currency = row.getString("currency")
+    )
+}

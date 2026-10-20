@@ -1,5 +1,6 @@
 package alexeyyuditsky
 
+import alexeyyuditsky.auth.AuthRateLimiter
 import alexeyyuditsky.auth.configureAuthRouting
 import alexeyyuditsky.config.BackendConfig
 import alexeyyuditsky.core.browser.ChromeBrowserClient
@@ -14,7 +15,12 @@ import alexeyyuditsky.feature.auth.domain.AuthService
 import alexeyyuditsky.feature.ozon.OzonBrowserClient
 import alexeyyuditsky.feature.ozon.OzonPriceParser
 import alexeyyuditsky.feature.ozon.OzonPriceWatcher
+import alexeyyuditsky.feature.tracking.data.PostgresTrackingRepository
+import alexeyyuditsky.feature.tracking.domain.TrackingService
+import alexeyyuditsky.tracking.TrackingScheduler
+import alexeyyuditsky.tracking.configureTrackingRouting
 import io.ktor.server.application.Application
+import io.ktor.server.application.ApplicationStarted
 import io.ktor.server.application.ApplicationStopped
 import java.security.SecureRandom
 import java.time.Clock
@@ -47,6 +53,24 @@ fun Application.rootModule(config: BackendConfig, database: DatabaseConnection? 
         priceParser = parser
     )
     monitor.subscribe(ApplicationStopped) { if (it === this) priceWatcher.close() }
-    configureRouting(priceWatcher, authService, clock)
+    val authenticator = CallAuthenticator(authService)
+    val guard = PriceRequestGuard(
+        AuthRateLimiter(clock, maxRequests = 30),
+        PriceRequestQueue(capacity = 15)
+    )
+    configureRouting(priceWatcher, authenticator, guard)
+    if (pool != null) {
+        val trackingService = TrackingService(
+            repository = PostgresTrackingRepository(pool),
+            priceSource = priceWatcher,
+            clock = clock,
+            marketplace = "ozon",
+            productUrl = { externalId -> "https://www.ozon.ru/product/$externalId/" }
+        )
+        configureTrackingRouting(trackingService, authenticator, guard)
+        val scheduler = TrackingScheduler(trackingService)
+        monitor.subscribe(ApplicationStarted) { if (it === this) scheduler.start() }
+        monitor.subscribe(ApplicationStopped) { if (it === this) scheduler.stop() }
+    }
     configureHealthRouting(pool?.let { it::isHealthy }, priceWatcher::ensureBrowserReady)
 }

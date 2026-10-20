@@ -26,23 +26,33 @@ class OzonPriceParser(
             ?: error("Product offer was not found in JSON-LD")
         val price = offer.requiredString("price").toBigDecimalOrNull()
             ?: error("Product price is not a valid decimal number")
-        val bankAmount = parseBankAmount(html)
+        val priceState = parsePriceState(html)
 
         return ProductPrice(
             productId = product.requiredString("sku"),
-            regularAmount = price,
-            bankAmount = bankAmount,
+            regularAmount = priceState?.optionalString("price")?.toDisplayedPrice() ?: price,
+            bankAmount = priceState?.optionalString("cardPrice")?.toDisplayedPrice(),
             currency = offer.requiredString("priceCurrency"),
-            availability = offer.optionalString("availability")
+            availability = offer.optionalString("availability"),
+            title = product.optionalString("name"),
+            imageUrl = product["image"].findImageUrl()
         )
     }
 
-    private fun parseBankAmount(html: String): BigDecimal? {
-        val encodedState = PRICE_STATE_REGEX.find(html)?.groupValues?.get(1) ?: return null
-        val state = json.parseToJsonElement(encodedState.decodeHtmlAttribute()) as? JsonObject
-            ?: error("Ozon price state is not a JSON object")
+    private fun JsonElement?.findImageUrl(): String? = when (this) {
+        is JsonPrimitive -> contentOrNull?.takeIf { it.startsWith("https://") }
+        is JsonArray -> firstNotNullOfOrNull { it.findImageUrl() }
+        is JsonObject -> (get("url") ?: get("contentUrl")).findImageUrl()
+        else -> null
+    }
 
-        return state.optionalString("cardPrice")?.toDisplayedPrice()
+    // The price widget is rendered separately from the JSON-LD and holds the green Ozon Card price.
+    fun hasPriceWidget(html: String): Boolean = PRICE_STATE_REGEX.containsMatchIn(html)
+
+    private fun parsePriceState(html: String): JsonObject? {
+        val encodedState = PRICE_STATE_REGEX.find(html)?.groupValues?.get(1) ?: return null
+        return json.parseToJsonElement(encodedState.decodeHtmlAttribute()) as? JsonObject
+            ?: error("Ozon price state is not a JSON object")
     }
 
     private fun String.toDisplayedPrice(): BigDecimal =
