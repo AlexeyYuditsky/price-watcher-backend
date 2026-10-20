@@ -80,9 +80,7 @@ class ChromeBrowserClient(private val profileDirectory: File) : AutoCloseable {
                 var loadedPage: BrowserPage? = null
                 productPage.waitForCondition(
                     {
-                        check(documentStatus == null || documentStatus in 200..399) {
-                            "Product document returned HTTP $documentStatus"
-                        }
+                        // Anti-bot checks answer 403 first and reload the page once the browser passes them.
                         val snapshot = try {
                             BrowserPage(productPage.url(), documentStatus, productPage.title(), productPage.content())
                         } catch (error: PlaywrightException) {
@@ -103,9 +101,14 @@ class ChromeBrowserClient(private val profileDirectory: File) : AutoCloseable {
                             readyToParse
                         }
                     },
-                    Page.WaitForConditionOptions().setTimeout(60_000.0)
+                    Page.WaitForConditionOptions().setTimeout(15_000.0)
                 )
-                logger.info("Browser url={} readyMs={}", url, ready.elapsedNow().inWholeMilliseconds)
+                logger.info(
+                    "Browser url={} readyMs={} status={}",
+                    url,
+                    ready.elapsedNow().inWholeMilliseconds,
+                    documentStatus
+                )
                 checkNotNull(loadedPage)
             } finally {
                 productPage.offResponse(responseHandler)

@@ -29,7 +29,7 @@ class OzonPriceWatcher(
                 logger.info("Chrome startupMs={}", startup.elapsedNow().inWholeMilliseconds)
                 val page = browserClient.loadProductPage(url)
                 check(
-                    page.status in 200..299 && page.title.isNotBlank() &&
+                    page.title.isNotBlank() &&
                         !page.title.startsWith("Loading ") && page.title != "Antibot Challenge Page"
                 ) { "Ozon product page loading failed" }
                 val parsing = TimeSource.Monotonic.markNow()

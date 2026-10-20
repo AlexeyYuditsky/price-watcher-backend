@@ -15,7 +15,7 @@ exit /b %DEPLOY_EXIT%
 # POWERSHELL_PAYLOAD
 param(
     [switch]$CheckOnly,
-    [string]$ConnectionFile = (Join-Path $env:USERPROFILE 'Desktop\vpsCloudcore.cmd'),
+    [string]$ConnectionFile = (Join-Path $env:USERPROFILE 'Desktop\vps.cmd'),
     [string]$PlinkPath = 'C:\Program Files (x86)\pink\plink.exe'
 )
 
