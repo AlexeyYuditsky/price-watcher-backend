@@ -58,7 +58,7 @@ done < <(tar -tzf "$archive")
 
 upload_id=${archive##*/}
 upload_id=${upload_id%.tar.gz}
-find "$upload_dir" -mindepth 1 -maxdepth 1 -type f ! -name "$upload_id.*" ! -name "price-response-${checksum:0:8}.json" -delete
+find "$upload_dir" -mindepth 1 -maxdepth 1 -type f ! -name "$upload_id.*" -delete
 
 echo 'Preflight OK: checksum, service, paths and archive.'
 if [[ $mode == check ]]; then
@@ -131,32 +131,19 @@ health=$(curl -sS --max-time 40 -w ' HTTP %{http_code}' http://127.0.0.1:8080/he
 [[ $health == *'"status":"ok"'*' HTTP 200' ]] || { echo "Health check failed: $health" >&2; exit 1; }
 echo "Health OK: ${health% HTTP 200}"
 
-echo 'Checking a real Ozon price request (warning only)...'
-response_file=$upload_dir/price-response-${checksum:0:8}.json
-price_ok=0
-for attempt in 1 2 3; do
-    code=$(curl -sS --max-time 150 -o "$response_file" -w '%{http_code}' \
-        -H 'Content-Type: application/json' \
-        --data '{"url":"https://www.ozon.ru/product/ryukzak-5677073262/"}' \
-        http://127.0.0.1:8080/products/price || true)
-    if [[ $code == 200 ]] && grep -Eq '"amount"[[:space:]]*:' "$response_file"; then
-        price_ok=1
-        break
-    fi
-    echo "Price check attempt $attempt failed: HTTP $code" >&2
-    (( attempt < 3 )) && sleep 15
-done
-if (( price_ok )); then
-    echo "Price check OK: $(cat "$response_file")"
-else
-    echo 'WARNING: the backend is healthy, but the Ozon price request failed. Keeping the new release; check Ozon via VNC.' >&2
-fi
+echo 'Checking that price requests require authorization...'
+code=$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' \
+    -H 'Content-Type: application/json' \
+    --data '{"url":"https://www.ozon.ru/product/ryukzak-5677073262/"}' \
+    http://127.0.0.1:8080/products/price || true)
+[[ $code == 401 ]] || { echo "Price authorization check failed: HTTP $code (expected 401)" >&2; exit 1; }
+echo 'Price authorization OK: anonymous request rejected with 401.'
 systemctl is-active --quiet "$service"
 systemctl show "$service" -p ActiveState -p MainPID
 # The release is committed: cleanup failures must not trigger rollback.
 trap - EXIT
 echo 'Deployment successful. Removing uploaded files and previous release backups...'
-rm -f -- "$upload_dir/$upload_id".* "$response_file"
+rm -f -- "$upload_dir/$upload_id".*
 parent_path=$(realpath -e -- "$parent")
 while IFS= read -r -d '' old_backup; do
     backup_name=${old_backup##*/}

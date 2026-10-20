@@ -20,21 +20,20 @@ import java.security.SecureRandom
 import java.time.Clock
 
 fun Application.rootModule(config: BackendConfig, database: DatabaseConnection? = null) {
+    val clock = Clock.systemUTC()
     val pool = database?.let(::DatabasePool)
-    if (pool != null) {
-        monitor.subscribe(ApplicationStopped) { if (it === this) pool.close() }
-        val clock = Clock.systemUTC()
+    val authService = pool?.let {
+        monitor.subscribe(ApplicationStopped) { app -> if (app === this) pool.close() }
         val random = SecureRandom()
-        configureAuthRouting(
-            AuthService(
-                PostgresAuthRepository(pool),
-                Pbkdf2PasswordHasher(random),
-                SecureTokenGenerator(random),
-                clock
-            ),
-            clock,
-            trustedProxies = config.trustedProxies
+        AuthService(
+            PostgresAuthRepository(pool),
+            Pbkdf2PasswordHasher(random),
+            SecureTokenGenerator(random),
+            clock
         )
+    }
+    if (authService != null) {
+        configureAuthRouting(authService, clock, trustedProxies = config.trustedProxies)
     }
     val launcher = when (config.profile) {
         "local" -> LocalChromeLauncher(config.chromeProfile)
@@ -48,6 +47,6 @@ fun Application.rootModule(config: BackendConfig, database: DatabaseConnection? 
         priceParser = parser
     )
     monitor.subscribe(ApplicationStopped) { if (it === this) priceWatcher.close() }
-    configureRouting(priceWatcher)
+    configureRouting(priceWatcher, authService, clock)
     configureHealthRouting(pool?.let { it::isHealthy }, priceWatcher::ensureBrowserReady)
 }

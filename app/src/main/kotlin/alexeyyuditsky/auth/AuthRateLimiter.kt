@@ -3,7 +3,7 @@ package alexeyyuditsky.auth
 import java.time.Clock
 import java.time.Duration
 
-internal class AuthRateLimiter(private val clock: Clock) {
+internal class AuthRateLimiter(private val clock: Clock, private val maxRequests: Int = 20) {
     private val windows = mutableMapOf<String, MutableList<Long>>()
 
     @Synchronized
@@ -16,7 +16,7 @@ internal class AuthRateLimiter(private val clock: Clock) {
         val attempts = windows[address]
         if (attempts == null && windows.size >= 10_000) return false
         val current = attempts ?: mutableListOf<Long>().also { windows[address] = it }
-        if (current.size >= 20) return false
+        if (current.size >= maxRequests) return false
         current.add(clock.millis())
         return true
     }
