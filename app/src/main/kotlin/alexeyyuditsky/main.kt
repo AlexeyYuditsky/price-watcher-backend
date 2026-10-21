@@ -10,13 +10,8 @@ fun main(args: Array<String>) {
     require(args.isEmpty() || args.contentEquals(arrayOf("--migrate"))) { "Unsupported arguments" }
     val config = BackendConfig.load()
     val database = DatabaseConfig.load(config.profile)
-    if (database != null) {
-        val applied = DatabaseMigrator().migrate(database)
-        println("Database migrations applied: $applied")
-    } else {
-        check(args.isEmpty()) { "Database configuration is required for --migrate" }
-        println("Database is not configured; continuing without persistence")
-    }
+    val applied = DatabaseMigrator().migrate(database)
+    println("Database migrations applied: $applied")
     if (args.contentEquals(arrayOf("--migrate"))) {
         return
     }

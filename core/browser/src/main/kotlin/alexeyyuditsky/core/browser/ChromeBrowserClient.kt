@@ -1,8 +1,6 @@
 package alexeyyuditsky.core.browser
 
 import com.microsoft.playwright.Browser
-import com.microsoft.playwright.BrowserContext
-import com.microsoft.playwright.Locator
 import com.microsoft.playwright.Page
 import com.microsoft.playwright.Playwright
 import com.microsoft.playwright.PlaywrightException
@@ -13,12 +11,11 @@ import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import org.slf4j.LoggerFactory
-import java.io.File
 import java.util.concurrent.Executors
 import java.util.function.Consumer
 import kotlin.time.TimeSource
 
-class ChromeBrowserClient(private val profileDirectory: File) : AutoCloseable {
+class ChromeBrowserClient : AutoCloseable {
 
     private val dispatcher = Executors.newSingleThreadExecutor { task ->
         Thread(task, "chrome-browser")
@@ -27,7 +24,6 @@ class ChromeBrowserClient(private val profileDirectory: File) : AutoCloseable {
     private var playwright: Playwright? = null
     private var browser: Browser? = null
     private var page: Page? = null
-    private var profileVerified = false
     private val logger = LoggerFactory.getLogger(ChromeBrowserClient::class.java)
 
     suspend fun loadPage(
@@ -47,14 +43,9 @@ class ChromeBrowserClient(private val profileDirectory: File) : AutoCloseable {
                 ?: driver.chromium().connectOverCDP(CDP_ENDPOINT).also {
                     browser = it
                     page = null
-                    profileVerified = false
                 }
             val context = connectedBrowser.contexts().firstOrNull()
                 ?: error("Chrome did not provide a browser context")
-            if (!profileVerified) {
-                verifyProfile(context)
-                profileVerified = true
-            }
             val productPage = page?.takeUnless { it.isClosed }
                 ?: (context.pages().firstOrNull {
                     it.url() in setOf("about:blank", "chrome://newtab/", "chrome://new-tab-page/")
@@ -123,33 +114,9 @@ class ChromeBrowserClient(private val profileDirectory: File) : AutoCloseable {
         }
     }
 
-    private fun verifyProfile(context: BrowserContext) {
-        val versionPage = context.newPage()
-        try {
-            versionPage.navigate(
-                "chrome://version/",
-                Page.NavigateOptions().setWaitUntil(WaitUntilState.DOMCONTENTLOADED).setTimeout(5_000.0)
-            )
-            val profilePath = versionPage.locator("#profile_path").innerText(
-                Locator.InnerTextOptions().setTimeout(5_000.0)
-            ).trim()
-            check(profilePath.isNotEmpty()) { "Chrome did not report its profile path" }
-            val actualDirectory = File(profilePath).canonicalFile.parentFile
-            val expectedDirectory = profileDirectory.canonicalFile
-            check(actualDirectory == expectedDirectory) {
-                "Chrome on port 9222 uses user data directory '$actualDirectory', " +
-                    "but CHROME_PROFILE requires '$expectedDirectory'. " +
-                    "Close that Chrome instance or select its profile explicitly before retrying."
-            }
-        } finally {
-            versionPage.close()
-        }
-    }
-
     suspend fun resetConnection() = withContext(dispatcher) {
         page = null
         browser = null
-        profileVerified = false
         val driver = playwright
         playwright = null
         driver?.close()

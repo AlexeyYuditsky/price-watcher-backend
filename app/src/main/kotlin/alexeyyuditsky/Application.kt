@@ -25,32 +25,26 @@ import io.ktor.server.application.ApplicationStopped
 import java.security.SecureRandom
 import java.time.Clock
 
-fun Application.rootModule(config: BackendConfig, database: DatabaseConnection? = null) {
+fun Application.rootModule(config: BackendConfig, database: DatabaseConnection) {
     val clock = Clock.systemUTC()
-    val pool = database?.let(::DatabasePool)
-    val authService = pool?.let {
-        monitor.subscribe(ApplicationStopped) { app -> if (app === this) pool.close() }
-        val random = SecureRandom()
-        AuthService(
-            PostgresAuthRepository(pool),
-            Pbkdf2PasswordHasher(random),
-            SecureTokenGenerator(random),
-            clock
-        )
-    }
-    if (authService != null) {
-        configureAuthRouting(authService, clock, trustedProxies = config.trustedProxies)
-    }
+    val pool = DatabasePool(database)
+    monitor.subscribe(ApplicationStopped) { if (it === this) pool.close() }
+    val random = SecureRandom()
+    val authService = AuthService(
+        PostgresAuthRepository(pool),
+        Pbkdf2PasswordHasher(random),
+        SecureTokenGenerator(random),
+        clock
+    )
+    configureAuthRouting(authService, clock, trustedProxies = config.trustedProxies)
     val launcher = when (config.profile) {
         "local" -> LocalChromeLauncher(config.chromeProfile)
         "vps" -> VpsChromeLauncher(config.chromeProfile)
         else -> error("Unsupported backend profile: ${config.profile}")
     }
-    val parser = OzonPriceParser()
     val priceWatcher = OzonPriceWatcher(
         chromeLauncher = launcher,
-        browserClient = OzonBrowserClient(ChromeBrowserClient(config.chromeProfile), parser),
-        priceParser = parser
+        browserClient = OzonBrowserClient(ChromeBrowserClient(), OzonPriceParser())
     )
     monitor.subscribe(ApplicationStopped) { if (it === this) priceWatcher.close() }
     val authenticator = CallAuthenticator(authService)
@@ -59,18 +53,16 @@ fun Application.rootModule(config: BackendConfig, database: DatabaseConnection? 
         PriceRequestQueue(capacity = 15)
     )
     configureRouting(priceWatcher, authenticator, guard)
-    if (pool != null) {
-        val trackingService = TrackingService(
-            repository = PostgresTrackingRepository(pool),
-            priceSource = priceWatcher,
-            clock = clock,
-            marketplace = "ozon",
-            productUrl = { externalId -> "https://www.ozon.ru/product/$externalId/" }
-        )
-        configureTrackingRouting(trackingService, authenticator, guard)
-        val scheduler = TrackingScheduler(trackingService)
-        monitor.subscribe(ApplicationStarted) { if (it === this) scheduler.start() }
-        monitor.subscribe(ApplicationStopped) { if (it === this) scheduler.stop() }
-    }
-    configureHealthRouting(pool?.let { it::isHealthy }, priceWatcher::ensureBrowserReady)
+    val trackingService = TrackingService(
+        repository = PostgresTrackingRepository(pool),
+        priceSource = priceWatcher,
+        clock = clock,
+        marketplace = "ozon",
+        productUrl = { externalId -> "https://www.ozon.ru/product/$externalId/" }
+    )
+    configureTrackingRouting(trackingService, authenticator, guard)
+    val scheduler = TrackingScheduler(trackingService)
+    monitor.subscribe(ApplicationStarted) { if (it === this) scheduler.start() }
+    monitor.subscribe(ApplicationStopped) { if (it === this) scheduler.stop() }
+    configureHealthRouting(pool::isHealthy, priceWatcher::ensureBrowserReady)
 }

@@ -15,8 +15,9 @@ exit /b %DEPLOY_EXIT%
 # POWERSHELL_PAYLOAD
 param(
     [switch]$CheckOnly,
-    [string]$ConnectionFile = (Join-Path $env:USERPROFILE 'Desktop\vps.cmd'),
-    [string]$PlinkPath = 'C:\Program Files (x86)\pink\plink.exe'
+    [string]$Server = '31.59.37.237',
+    [string]$IdentityFile = (Join-Path $env:USERPROFILE '.ssh\id_ed25519'),
+    [string]$SshPath = (Join-Path $env:SystemRoot 'System32\OpenSSH\ssh.exe')
 )
 
 $ErrorActionPreference = 'Stop'
@@ -39,7 +40,8 @@ upload_dir=$parent/.deploy-uploads
 [[ $archive =~ ^/home/watcher/app/\.deploy-uploads/[a-f0-9]{32}\.tar\.gz$ ]] || exit 1
 [[ $checksum =~ ^[a-f0-9]{64}$ ]] || exit 1
 [[ $expected_version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || exit 1
-for tool in tar curl sha256sum flock java realpath find rm; do command -v "$tool" >/dev/null; done
+for tool in tar curl sha256sum flock java realpath find rm runuser psql; do command -v "$tool" >/dev/null; done
+sql() { (cd / && runuser -u postgres -- psql -d price_watcher -qAt -v ON_ERROR_STOP=1 -c "$1"); }
 exec 9>"$parent/.price-watcher-deploy.lock"
 flock -n 9 || { echo 'Another deployment is already running.' >&2; exit 1; }
 printf '%s  %s\n' "$checksum" "$archive" | sha256sum --check --status
@@ -107,6 +109,15 @@ old_moved=1
 mv -- "$stage/price-watcher" "$target"
 new_installed=1
 rmdir -- "$stage"
+# Make one tracked product due now: the scheduler checks a real Ozon price right after startup,
+# so no test account is needed for the price check below.
+price_product=''
+price_since=''
+# A fresh database has no tables until the new release applies its migrations.
+if [[ $(sql "SELECT to_regclass('public.products') IS NOT NULL AND to_regclass('public.tracked_products') IS NOT NULL" || true) == t ]]; then
+    due=$(sql "UPDATE products SET next_check_at = now() WHERE id = (SELECT p.id FROM products p WHERE EXISTS (SELECT 1 FROM tracked_products t WHERE t.product_id = p.id) ORDER BY p.next_check_at LIMIT 1) RETURNING id, extract(epoch FROM now())" || true)
+    IFS='|' read -r price_product price_since <<< "$due" || true
+fi
 systemctl start "$service"
 
 ready=0
@@ -142,6 +153,31 @@ systemctl is-active --quiet "$service"
 systemctl show "$service" -p ActiveState -p MainPID
 # The release is committed: cleanup failures must not trigger rollback.
 trap - EXIT
+# A failed Ozon price is only a warning: the backend is healthy, Ozon may be throttling the server.
+if [[ -n $price_product ]]; then
+    echo 'Checking a real Ozon price (scheduled check started with the backend)...'
+    price_row() {
+        sql "SELECT p.external_id || ' ' || c.amount || ' ' || c.currency FROM price_checks c JOIN products p ON p.id = c.product_id WHERE c.product_id = '$price_product' AND c.checked_at >= to_timestamp($price_since) ORDER BY c.checked_at DESC LIMIT 1" || true
+    }
+    price=''
+    for attempt in {1..90}; do
+        price=$(price_row)
+        [[ -n $price ]] && break
+        # A failed scheduled check moves next_check_at forward without saving a price.
+        if [[ $(sql "SELECT next_check_at > now() FROM products WHERE id = '$price_product'" || true) == t ]]; then
+            price=$(price_row)
+            break
+        fi
+        sleep 1
+    done
+    if [[ -n $price ]]; then
+        echo "Price OK: product $price"
+    else
+        echo 'WARNING: the backend is healthy, but the Ozon price check failed. Keeping the new release; check Ozon via VNC.' >&2
+    fi
+else
+    echo 'No tracked products: skipping the real Ozon price check.'
+fi
 echo 'Deployment successful. Removing uploaded files and previous release backups...'
 rm -f -- "$upload_dir/$upload_id".*
 parent_path=$(realpath -e -- "$parent")
@@ -168,25 +204,19 @@ while IFS= read -r -d '' old_backup; do
 done < <(find "$parent" -mindepth 1 -maxdepth 1 -type d \( -name 'price-watcher-backup-*' -o -name 'price-watcher-failed-*' \) -print0)
 '@
 
-$secretDirectory = $null
+$workDirectory = $null
 $exitCode = 1
-
-function Read-ConnectionLiteral([string]$text, [string]$name) {
-    $pattern = '(?m)^\$' + [regex]::Escape($name) + '\s*=\s*''((?:[^'']|'''')*)'''
-    $match = [regex]::Match($text, $pattern)
-    if (-not $match.Success) { throw "Missing $name in the local connection file." }
-    return $match.Groups[1].Value.Replace("''", "'")
-}
 
 # A UTF-8 console makes .NET prefix redirected stdin with a BOM, which breaks the remote shell script.
 [Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false)
 
 function Invoke-Remote([string]$command, [string]$inputFile = '') {
-    $commandFile = Join-Path $secretDirectory 'remote-command.txt'
-    [System.IO.File]::WriteAllText($commandFile, $command, [System.Text.UTF8Encoding]::new($false))
+    if ($command.Contains('"')) { throw 'Remote command must not contain double quotes.' }
     $startInfo = New-Object System.Diagnostics.ProcessStartInfo
-    $startInfo.FileName = $PlinkPath
-    $startInfo.Arguments = '-ssh -batch -noagent -hostkey "' + $hostKey + '" -pwfile "' + $passwordFile + '" -m "' + $commandFile + '" root@' + $server
+    $startInfo.FileName = $SshPath
+    # Key-only login; the host key must already be in known_hosts.
+    $startInfo.Arguments = '-T -o BatchMode=yes -o StrictHostKeyChecking=yes -o IdentitiesOnly=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 ' +
+        '-i "' + $IdentityFile + '" root@' + $Server + ' "' + $command + '"'
     $startInfo.UseShellExecute = $false
     $startInfo.CreateNoWindow = $true
     $startInfo.RedirectStandardInput = $true
@@ -211,7 +241,7 @@ function Invoke-Remote([string]$command, [string]$inputFile = '') {
                     }
                     Start-Sleep -Milliseconds 250
                 }
-                $copyTask.GetAwaiter().GetResult()
+                [void]$copyTask.GetAwaiter().GetResult()
                 Write-Host ('  Upload: 100% ({0:N1} MiB)' -f ($stream.Length / 1MB))
             } finally { $stream.Dispose() }
         }
@@ -229,18 +259,9 @@ function Invoke-Remote([string]$command, [string]$inputFile = '') {
 
 Push-Location $projectDirectory
 try {
-    if (-not (Test-Path -LiteralPath $PlinkPath)) { throw "Plink not found: $PlinkPath" }
-    $signature = Get-AuthenticodeSignature -LiteralPath $PlinkPath
-    if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'Simon Tatham') {
-        throw 'Plink signature validation failed.'
-    }
-    $connection = [System.IO.File]::ReadAllText($ConnectionFile)
-    $server = Read-ConnectionLiteral $connection 'Server'
-    $hostKey = Read-ConnectionLiteral $connection 'HostKey'
-    $sshPassword = Read-ConnectionLiteral $connection 'SshPassword'
-    $connection = $null
-    if ($server -notmatch '^[a-zA-Z0-9][a-zA-Z0-9.-]*$') { throw 'Invalid SSH host.' }
-    if ($hostKey -notmatch '^SHA256:[a-zA-Z0-9+/=]+$') { throw 'Invalid SSH host key.' }
+    if (-not (Test-Path -LiteralPath $SshPath)) { throw "OpenSSH client not found: $SshPath" }
+    if (-not (Test-Path -LiteralPath $IdentityFile)) { throw "SSH key not found: $IdentityFile" }
+    if ($Server -notmatch '^[a-zA-Z0-9][a-zA-Z0-9.-]*$') { throw 'Invalid SSH host.' }
 
     $deploymentId = [guid]::NewGuid().ToString('N')
     $versionMatch = [regex]::Match([System.IO.File]::ReadAllText((Join-Path $projectDirectory 'gradle.properties')), '(?m)^backendVersion=([0-9]+\.[0-9]+\.[0-9]+)\r?$')
@@ -257,24 +278,16 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Cannot create the deployment archive.' }
     $checksum = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
 
-    $secretDirectory = Join-Path $env:TEMP ('price-watcher-deploy-' + $deploymentId)
-    [System.IO.Directory]::CreateDirectory($secretDirectory) | Out-Null
-    $acl = Get-Acl -LiteralPath $secretDirectory
-    $acl.SetAccessRuleProtection($true, $false)
-    $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
-    $acl.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new($identity, 'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow'))
-    Set-Acl -LiteralPath $secretDirectory -AclObject $acl
-    $passwordFile = Join-Path $secretDirectory 'ssh-password.txt'
-    [System.IO.File]::WriteAllText($passwordFile, $sshPassword, [System.Text.UTF8Encoding]::new($false))
-    $sshPassword = $null
+    $workDirectory = Join-Path $env:TEMP ('price-watcher-deploy-' + $deploymentId)
+    [System.IO.Directory]::CreateDirectory($workDirectory) | Out-Null
 
-    Write-Host "[2/4] Uploading to $server..."
+    Write-Host "[2/4] Uploading to $Server..."
     $remoteDirectory = '/home/watcher/app/.deploy-uploads'
     $remoteArchive = "$remoteDirectory/$deploymentId.tar.gz"
     $remoteScript = "$remoteDirectory/$deploymentId.sh"
     Invoke-Remote "umask 077; mkdir -p '$remoteDirectory' && cat > '$remoteArchive'" $archive
     # Force LF even if Git checks out the shell script with CRLF on Windows.
-    $shellFile = Join-Path $secretDirectory 'deploy-vps.sh'
+    $shellFile = Join-Path $workDirectory 'deploy-vps.sh'
     $shellText = $serverScript.Replace("`r`n", "`n").TrimEnd([char[]]"`r`n")
     [System.IO.File]::WriteAllText($shellFile, $shellText, [System.Text.UTF8Encoding]::new($false))
 
@@ -288,13 +301,10 @@ try {
 } catch {
     Write-Host $_.Exception.Message -ForegroundColor Red
 } finally {
-    $sshPassword = $null
-    if ($secretDirectory) {
-        foreach ($name in @('ssh-password.txt', 'remote-command.txt', 'deploy-vps.sh')) {
-            $file = Join-Path $secretDirectory $name
-            if ([System.IO.File]::Exists($file)) { [System.IO.File]::Delete($file) }
-        }
-        if ([System.IO.Directory]::Exists($secretDirectory)) { [System.IO.Directory]::Delete($secretDirectory) }
+    if ($workDirectory) {
+        $file = Join-Path $workDirectory 'deploy-vps.sh'
+        if ([System.IO.File]::Exists($file)) { [System.IO.File]::Delete($file) }
+        if ([System.IO.Directory]::Exists($workDirectory)) { [System.IO.Directory]::Delete($workDirectory) }
     }
     Pop-Location
 }

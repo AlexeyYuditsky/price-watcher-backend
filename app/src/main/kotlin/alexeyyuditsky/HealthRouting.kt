@@ -15,15 +15,12 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
 fun Application.configureHealthRouting(
-    databaseHealthy: (() -> Boolean)?,
+    databaseHealthy: () -> Boolean,
     ensureBrowserReady: suspend () -> Unit
 ) {
     routing {
         get("/health") {
-            val database = when (databaseHealthy) {
-                null -> "disabled"
-                else -> if (withContext(Dispatchers.IO) { databaseHealthy() }) "ok" else "failed"
-            }
+            val database = if (withContext(Dispatchers.IO) { databaseHealthy() }) "ok" else "failed"
             val browser = try {
                 withTimeoutOrNull(30_000) { ensureBrowserReady() }?.let { "ok" } ?: "timeout"
             } catch (error: Exception) {
@@ -31,7 +28,7 @@ fun Application.configureHealthRouting(
                 call.application.log.error("Browser health check failed", error)
                 "failed"
             }
-            val healthy = database != "failed" && browser == "ok"
+            val healthy = database == "ok" && browser == "ok"
             call.response.headers.append("Cache-Control", "no-store")
             call.respondText(
                 buildJsonObject {

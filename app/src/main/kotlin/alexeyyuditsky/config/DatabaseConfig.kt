@@ -9,7 +9,7 @@ object DatabaseConfig {
         profile: String,
         environment: Map<String, String> = System.getenv(),
         userHome: String = System.getProperty("user.home")
-    ): DatabaseConnection? {
+    ): DatabaseConnection {
         fun variable(name: String): String? =
             environment[name] ?: environment.entries.firstOrNull {
                 it.key.equals(name, ignoreCase = true)
@@ -32,17 +32,14 @@ object DatabaseConfig {
         val url = variable("DB_URL") ?: properties.getProperty("db.url")
         val user = variable("DB_USER") ?: properties.getProperty("db.user")
         val password = variable("DB_PASSWORD") ?: properties.getProperty("db.password")
-        if (url == null && user == null && password == null) {
-            check(profile != "local") {
-                "Local database configuration is missing. Set DB_CONFIG_FILE or DB_URL, DB_USER and DB_PASSWORD."
-            }
-            return null
+        check(url != null || user != null || password != null) {
+            "Database configuration is missing. Set DB_CONFIG_FILE or DB_URL and DB_USER (DB_PASSWORD is optional)."
         }
         require(!url.isNullOrBlank() && url.startsWith("jdbc:postgresql:")) {
             "DB_URL must be a PostgreSQL JDBC URL"
         }
         require(!user.isNullOrBlank()) { "DB_USER is required" }
-        require(!password.isNullOrBlank()) { "DB_PASSWORD is required" }
-        return DatabaseConnection(url, user, password)
+        // A missing password is allowed for servers that trust local connections (pg_hba "trust").
+        return DatabaseConnection(url, user, password?.ifBlank { null })
     }
 }

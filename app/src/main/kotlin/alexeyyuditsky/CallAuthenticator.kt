@@ -10,14 +10,10 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-internal class CallAuthenticator(private val authService: AuthService?) {
+internal class CallAuthenticator(private val authService: AuthService) {
 
     suspend fun userId(call: RoutingCall): UUID? {
         call.response.headers.append("Cache-Control", "no-store")
-        if (authService == null) {
-            call.respondError(HttpStatusCode.ServiceUnavailable, "Authentication is not configured")
-            return null
-        }
         val token = call.request.headers["Authorization"]
             ?.takeIf { it.startsWith("Bearer ", ignoreCase = true) }
             ?.substring(7)
