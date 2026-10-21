@@ -21,9 +21,9 @@ tasks.build {
 }
 
 tasks.check {
-    dependsOn(":app:check", ":core:browser:check", ":core:database:check", ":core:products:check", ":feature:ozon:check", ":feature:auth:check")
+    dependsOn(":app:check", ":core:browser:check", ":core:database:check", ":core:products:check", ":feature:ozon:check", ":feature:auth:check", ":feature:tracking:check")
 }
 
 tasks.clean {
-    dependsOn(":app:clean", ":core:browser:clean", ":core:database:clean", ":core:products:clean", ":feature:ozon:clean", ":feature:auth:clean")
+    dependsOn(":app:clean", ":core:browser:clean", ":core:database:clean", ":core:products:clean", ":feature:ozon:clean", ":feature:auth:clean", ":feature:tracking:clean")
 }
