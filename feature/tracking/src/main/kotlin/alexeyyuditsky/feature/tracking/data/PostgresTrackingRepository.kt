@@ -3,12 +3,13 @@ package alexeyyuditsky.feature.tracking.data
 import alexeyyuditsky.core.database.DatabasePool
 import alexeyyuditsky.core.products.ProductPrice
 import alexeyyuditsky.feature.tracking.domain.DueProduct
-import alexeyyuditsky.feature.tracking.domain.PricePoint
+import alexeyyuditsky.feature.tracking.domain.PricePeriod
 import alexeyyuditsky.feature.tracking.domain.ProductSnapshot
 import alexeyyuditsky.feature.tracking.domain.TrackedProduct
 import alexeyyuditsky.feature.tracking.domain.TrackingRepository
 import java.sql.Connection
 import java.sql.Timestamp
+import java.sql.Types
 import java.time.Instant
 import java.util.UUID
 
@@ -21,11 +22,15 @@ class PostgresTrackingRepository(private val pool: DatabasePool) : TrackingRepos
         checkedAt: Instant,
         nextCheckAt: Instant
     ): UUID = transaction { connection ->
+        // The upsert locks the product row, so concurrent checks of one product compare prices in turn.
         val productId = connection.prepareStatement(
-            "INSERT INTO products(marketplace, external_id, url, title, image_url, next_check_at) " +
-                "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (marketplace, external_id) DO UPDATE SET " +
+            "INSERT INTO products(marketplace, external_id, url, title, image_url, units_per_pack, " +
+                "last_checked_at, next_check_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) " +
+                "ON CONFLICT (marketplace, external_id) DO UPDATE SET " +
                 "url = EXCLUDED.url, title = COALESCE(EXCLUDED.title, products.title), " +
                 "image_url = COALESCE(EXCLUDED.image_url, products.image_url), " +
+                "units_per_pack = COALESCE(EXCLUDED.units_per_pack, products.units_per_pack), " +
+                "last_checked_at = GREATEST(EXCLUDED.last_checked_at, products.last_checked_at), " +
                 "next_check_at = EXCLUDED.next_check_at RETURNING id"
         ).use { statement ->
             statement.setString(1, product.marketplace)
@@ -33,23 +38,31 @@ class PostgresTrackingRepository(private val pool: DatabasePool) : TrackingRepos
             statement.setString(3, product.url)
             statement.setString(4, product.title)
             statement.setString(5, product.imageUrl)
-            statement.setTimestamp(6, Timestamp.from(nextCheckAt))
+            statement.setObject(6, product.unitsPerPack, Types.INTEGER)
+            statement.setTimestamp(7, Timestamp.from(checkedAt))
+            statement.setTimestamp(8, Timestamp.from(nextCheckAt))
             statement.executeQuery().use { rows ->
                 rows.next()
                 rows.getObject("id", UUID::class.java)
             }
         }
+        // History grows only when the price differs from the latest saved one.
         connection.prepareStatement(
-            "INSERT INTO price_checks(product_id, checked_at, amount, regular_amount, bank_amount, " +
-                "currency, availability) VALUES (?, ?, ?, ?, ?, ?, ?)"
+            "INSERT INTO price_changes(product_id, changed_at, amount, currency) " +
+                "SELECT ?, ?::timestamptz, ?::numeric, ?::text WHERE NOT EXISTS (" +
+                "SELECT 1 FROM (SELECT changed_at, amount, currency FROM price_changes WHERE product_id = ? " +
+                "ORDER BY changed_at DESC LIMIT 1) latest " +
+                "WHERE (latest.amount = ?::numeric AND latest.currency = ?::text) " +
+                "OR latest.changed_at >= ?::timestamptz)"
         ).use { statement ->
             statement.setObject(1, productId)
             statement.setTimestamp(2, Timestamp.from(checkedAt))
             statement.setBigDecimal(3, price.amount)
-            statement.setBigDecimal(4, price.regularAmount)
-            statement.setBigDecimal(5, price.bankAmount)
-            statement.setString(6, price.currency)
-            statement.setString(7, price.availability)
+            statement.setString(4, price.currency)
+            statement.setObject(5, productId)
+            statement.setBigDecimal(6, price.amount)
+            statement.setString(7, price.currency)
+            statement.setTimestamp(8, Timestamp.from(checkedAt))
             statement.executeUpdate()
         }
         productId
@@ -69,13 +82,30 @@ class PostgresTrackingRepository(private val pool: DatabasePool) : TrackingRepos
         }
     }
 
-    override fun untrack(userId: UUID, productId: UUID): Boolean = pool.open().use { connection ->
-        connection.prepareStatement("DELETE FROM tracked_products WHERE user_id = ? AND product_id = ?")
+    override fun untrack(userId: UUID, productId: UUID): Boolean = transaction { connection ->
+        val removed = connection.prepareStatement("DELETE FROM tracked_products WHERE user_id = ? AND product_id = ?")
             .use { statement ->
                 statement.setObject(1, userId)
                 statement.setObject(2, productId)
                 statement.executeUpdate() > 0
             }
+        if (removed) deleteUntracked(connection, productId)
+        removed
+    }
+
+    override fun deleteIfUntracked(productId: UUID) {
+        pool.open().use { connection -> deleteUntracked(connection, productId) }
+    }
+
+    // The price history goes with the product through ON DELETE CASCADE.
+    private fun deleteUntracked(connection: Connection, productId: UUID) {
+        connection.prepareStatement(
+            "DELETE FROM products p WHERE p.id = ? " +
+                "AND NOT EXISTS (SELECT 1 FROM tracked_products t WHERE t.product_id = p.id)"
+        ).use { statement ->
+            statement.setObject(1, productId)
+            statement.executeUpdate()
+        }
     }
 
     override fun list(userId: UUID): List<TrackedProduct> = pool.open().use { connection ->
@@ -97,19 +127,21 @@ class PostgresTrackingRepository(private val pool: DatabasePool) : TrackingRepos
         }
     }
 
-    override fun history(userId: UUID, productId: UUID, since: Instant): List<PricePoint> =
+    override fun history(userId: UUID, productId: UUID): List<PricePeriod> =
         pool.open().use { connection ->
             connection.prepareStatement(
-                "SELECT c.checked_at, c.amount, c.currency FROM price_checks c " +
+                "SELECT c.changed_at AS started_at, COALESCE(lead(c.changed_at) OVER (ORDER BY c.changed_at), " +
+                    "p.last_checked_at, c.changed_at) AS ended_at, c.amount, $UNIT_AMOUNT, c.currency " +
+                    "FROM price_changes c " +
+                    "JOIN products p ON p.id = c.product_id " +
                     "JOIN tracked_products t ON t.product_id = c.product_id " +
-                    "WHERE t.user_id = ? AND c.product_id = ? AND c.checked_at >= ? " +
-                    "ORDER BY c.checked_at DESC"
+                    "WHERE t.user_id = ? AND c.product_id = ? " +
+                    "ORDER BY c.changed_at DESC"
             ).use { statement ->
                 statement.setObject(1, userId)
                 statement.setObject(2, productId)
-                statement.setTimestamp(3, Timestamp.from(since))
                 statement.executeQuery().use { rows ->
-                    buildList { while (rows.next()) add(mapper.pricePoint(rows)) }
+                    buildList { while (rows.next()) add(mapper.pricePeriod(rows)) }
                 }
             }
         }
@@ -155,11 +187,17 @@ class PostgresTrackingRepository(private val pool: DatabasePool) : TrackingRepos
     }
 
     private companion object {
+        const val UNIT_AMOUNT = "round(c.amount / p.units_per_pack, 2) AS unit_amount"
+        // The previous price is the change before the latest one; a price in another currency is not comparable.
         const val TRACKED_PRODUCTS_QUERY =
-            "SELECT p.id, p.url, p.title, p.image_url, c.checked_at, c.amount, c.currency " +
+            "SELECT p.id, p.url, p.title, p.image_url, p.last_checked_at AS checked_at, c.amount, " +
+                "$UNIT_AMOUNT, c.currency, " +
+                "CASE WHEN prev.currency = c.currency THEN prev.amount END AS previous_amount " +
                 "FROM tracked_products t JOIN products p ON p.id = t.product_id " +
-                "LEFT JOIN LATERAL (SELECT checked_at, amount, currency FROM price_checks " +
-                "WHERE product_id = p.id ORDER BY checked_at DESC LIMIT 1) c ON TRUE " +
+                "LEFT JOIN LATERAL (SELECT amount, currency FROM price_changes " +
+                "WHERE product_id = p.id ORDER BY changed_at DESC LIMIT 1) c ON TRUE " +
+                "LEFT JOIN LATERAL (SELECT amount, currency FROM price_changes " +
+                "WHERE product_id = p.id ORDER BY changed_at DESC OFFSET 1 LIMIT 1) prev ON TRUE " +
                 "WHERE t.user_id = ?"
     }
 }

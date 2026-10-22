@@ -4,13 +4,10 @@ import java.math.BigDecimal
 
 data class ProductPrice(
     val productId: String,
-    val regularAmount: BigDecimal,
-    val bankAmount: BigDecimal?,
+    val amount: BigDecimal,
     val currency: String,
-    val availability: String?,
+    // Set only for packs of several pieces; the price per piece is amount divided by it.
+    val unitsPerPack: Int? = null,
     val title: String? = null,
     val imageUrl: String? = null
-) {
-    val amount: BigDecimal
-        get() = bankAmount ?: regularAmount
-}
+)

@@ -1,5 +1,6 @@
 package alexeyyuditsky.tracking
 
+import alexeyyuditsky.feature.tracking.domain.PricePeriod
 import alexeyyuditsky.feature.tracking.domain.PricePoint
 import alexeyyuditsky.feature.tracking.domain.TrackedProduct
 import kotlinx.serialization.json.JsonArray
@@ -23,13 +24,23 @@ internal class TrackingResponseMapper {
         put("products", buildJsonArray { products.forEach { add(product(it)) } })
     }
 
-    fun history(points: List<PricePoint>): JsonObject = buildJsonObject {
-        put("points", JsonArray(points.map(::pricePoint)))
+    fun history(periods: List<PricePeriod>): JsonObject = buildJsonObject {
+        put("periods", JsonArray(periods.map(::pricePeriod)))
+    }
+
+    private fun pricePeriod(period: PricePeriod): JsonObject = buildJsonObject {
+        put("from", period.from.toString())
+        put("to", period.to.toString())
+        put("amount", JsonPrimitive(period.amount))
+        put("unitAmount", period.unitAmount?.let(::JsonPrimitive) ?: JsonNull)
+        put("currency", period.currency)
     }
 
     private fun pricePoint(point: PricePoint): JsonObject = buildJsonObject {
         put("checkedAt", point.checkedAt.toString())
         put("amount", JsonPrimitive(point.amount))
+        put("unitAmount", point.unitAmount?.let(::JsonPrimitive) ?: JsonNull)
         put("currency", point.currency)
+        put("previousAmount", point.previousAmount?.let(::JsonPrimitive) ?: JsonNull)
     }
 }

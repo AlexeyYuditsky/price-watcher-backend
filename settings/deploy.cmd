@@ -157,7 +157,7 @@ trap - EXIT
 if [[ -n $price_product ]]; then
     echo 'Checking a real Ozon price (scheduled check started with the backend)...'
     price_row() {
-        sql "SELECT p.external_id || ' ' || c.amount || ' ' || c.currency FROM price_checks c JOIN products p ON p.id = c.product_id WHERE c.product_id = '$price_product' AND c.checked_at >= to_timestamp($price_since) ORDER BY c.checked_at DESC LIMIT 1" || true
+        sql "SELECT p.external_id || ' ' || c.amount || ' ' || c.currency FROM products p JOIN price_changes c ON c.product_id = p.id WHERE p.id = '$price_product' AND p.last_checked_at >= to_timestamp($price_since) ORDER BY c.changed_at DESC LIMIT 1" || true
     }
     price=''
     for attempt in {1..90}; do

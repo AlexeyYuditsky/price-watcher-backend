@@ -5,5 +5,6 @@ data class ProductSnapshot(
     val externalId: String,
     val url: String,
     val title: String?,
-    val imageUrl: String?
+    val imageUrl: String?,
+    val unitsPerPack: Int?
 )

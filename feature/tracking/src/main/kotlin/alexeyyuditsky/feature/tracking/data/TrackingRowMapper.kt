@@ -1,5 +1,6 @@
 package alexeyyuditsky.feature.tracking.data
 
+import alexeyyuditsky.feature.tracking.domain.PricePeriod
 import alexeyyuditsky.feature.tracking.domain.PricePoint
 import alexeyyuditsky.feature.tracking.domain.TrackedProduct
 import java.sql.ResultSet
@@ -14,9 +15,19 @@ internal class TrackingRowMapper {
         latestPrice = row.getTimestamp("checked_at")?.let { pricePoint(row) }
     )
 
-    fun pricePoint(row: ResultSet): PricePoint = PricePoint(
+    fun pricePeriod(row: ResultSet): PricePeriod = PricePeriod(
+        from = row.getTimestamp("started_at").toInstant(),
+        to = row.getTimestamp("ended_at").toInstant(),
+        amount = row.getBigDecimal("amount"),
+        unitAmount = row.getBigDecimal("unit_amount"),
+        currency = row.getString("currency")
+    )
+
+    private fun pricePoint(row: ResultSet): PricePoint = PricePoint(
         checkedAt = row.getTimestamp("checked_at").toInstant(),
         amount = row.getBigDecimal("amount"),
-        currency = row.getString("currency")
+        unitAmount = row.getBigDecimal("unit_amount"),
+        currency = row.getString("currency"),
+        previousAmount = row.getBigDecimal("previous_amount")
     )
 }

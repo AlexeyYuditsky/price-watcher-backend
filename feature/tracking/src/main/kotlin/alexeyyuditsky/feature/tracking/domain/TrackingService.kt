@@ -34,10 +34,8 @@ class TrackingService(
 
     suspend fun remove(userId: UUID, productId: UUID): Boolean = io { repository.untrack(userId, productId) }
 
-    suspend fun history(userId: UUID, productId: UUID): List<PricePoint>? = io {
-        repository.find(userId, productId)?.let {
-            repository.history(userId, productId, clock.instant().minus(HISTORY_PERIOD))
-        }
+    suspend fun history(userId: UUID, productId: UUID): List<PricePeriod>? = io {
+        repository.find(userId, productId)?.let { repository.history(userId, productId) }
     }
 
     suspend fun refresh(userId: UUID, productId: UUID): TrackedProduct? {
@@ -50,7 +48,9 @@ class TrackingService(
 
     // Returns false when the check failed; the product is then retried after a normal interval.
     suspend fun checkScheduled(product: DueProduct): Boolean = try {
-        check(product.url)
+        val productId = check(product.url)
+        // The last user may have removed the product while its page was loading; the save then recreated it.
+        io { repository.deleteIfUntracked(productId) }
         true
     } catch (error: CancellationException) {
         throw error
@@ -76,7 +76,8 @@ class TrackingService(
         externalId = price.productId,
         url = productUrl(price.productId),
         title = price.title,
-        imageUrl = price.imageUrl
+        imageUrl = price.imageUrl,
+        unitsPerPack = price.unitsPerPack
     )
 
     private suspend fun <T> io(block: () -> T): T = withContext(Dispatchers.IO) { block() }
@@ -84,6 +85,5 @@ class TrackingService(
     private companion object {
         val MIN_CHECK_INTERVAL: Duration = Duration.ofMinutes(30)
         val CHECK_SPREAD: Duration = Duration.ofMinutes(15)
-        val HISTORY_PERIOD: Duration = Duration.ofDays(30)
     }
 }

@@ -14,7 +14,6 @@ import io.ktor.server.routing.RoutingContext
 import io.ktor.server.routing.routing
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -72,10 +71,7 @@ private suspend fun RoutingContext.fetchPrice(priceWatcher: ProductPriceSource) 
         val response = buildJsonObject {
             put("productId", price.productId)
             put("amount", JsonPrimitive(price.amount))
-            put("regularAmount", JsonPrimitive(price.regularAmount))
-            put("bankAmount", price.bankAmount?.let { JsonPrimitive(it) } ?: JsonNull)
             put("currency", price.currency)
-            put("availability", price.availability)
             put("fetchedAt", Instant.now().toString())
         }
         call.respondText(response.toString(), ContentType.Application.Json)
