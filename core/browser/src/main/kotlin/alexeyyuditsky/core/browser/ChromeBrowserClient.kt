@@ -1,6 +1,7 @@
 package alexeyyuditsky.core.browser
 
 import com.microsoft.playwright.Browser
+import com.microsoft.playwright.BrowserType
 import com.microsoft.playwright.Page
 import com.microsoft.playwright.Playwright
 import com.microsoft.playwright.PlaywrightException
@@ -11,11 +12,16 @@ import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import org.slf4j.LoggerFactory
+import java.net.URI
+import java.net.http.HttpClient
+import java.net.http.HttpRequest
+import java.net.http.HttpResponse
+import java.time.Duration
 import java.util.concurrent.Executors
 import java.util.function.Consumer
 import kotlin.time.TimeSource
 
-class ChromeBrowserClient : AutoCloseable {
+class ChromeBrowserClient(private val chromeLauncher: ChromeLauncher) : AutoCloseable {
 
     private val dispatcher = Executors.newSingleThreadExecutor { task ->
         Thread(task, "chrome-browser")
@@ -34,13 +40,8 @@ class ChromeBrowserClient : AutoCloseable {
         val total = TimeSource.Monotonic.markNow()
         try {
             val connection = TimeSource.Monotonic.markNow()
-            val driver = playwright ?: Playwright.create(
-                Playwright.CreateOptions().setEnv(
-                    System.getenv() + ("PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD" to "1")
-                )
-            ).also { playwright = it }
             val connectedBrowser = browser?.takeIf { it.isConnected }
-                ?: driver.chromium().connectOverCDP(CDP_ENDPOINT).also {
+                ?: connect().also {
                     browser = it
                     page = null
                 }
@@ -106,20 +107,69 @@ class ChromeBrowserClient : AutoCloseable {
             }
         } catch (error: PlaywrightException) {
             logger.warn("Browser url={} browser operation failed: {}", url, error.message)
-            page = null
-            browser = null
+            logTargets()
+            // A stuck Playwright connection survives a plain reconnect, so the driver is recreated too.
+            closeDriver()
             throw error
         } finally {
             logger.info("Browser url={} browserTotalMs={}", url, total.elapsedNow().inWholeMilliseconds)
         }
     }
 
-    suspend fun resetConnection() = withContext(dispatcher) {
+    private suspend fun connect(): Browser = try {
+        connectOnce()
+    } catch (error: PlaywrightException) {
+        logger.warn("Chrome connection failed, restarting Chrome: {}", error.message)
+        logTargets()
+        closeDriver()
+        chromeLauncher.restart()
+        connectOnce()
+    }
+
+    private fun connectOnce(): Browser {
+        val driver = playwright ?: Playwright.create(
+            Playwright.CreateOptions().setEnv(
+                System.getenv() + ("PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD" to "1")
+            )
+        ).also { playwright = it }
+        return driver.chromium().connectOverCDP(
+            CDP_ENDPOINT,
+            BrowserType.ConnectOverCDPOptions().setTimeout(CONNECT_TIMEOUT_MS)
+        )
+    }
+
+    private fun closeDriver() {
         page = null
         browser = null
         val driver = playwright
         playwright = null
-        driver?.close()
+        runCatching { driver?.close() }
+            .onFailure { logger.warn("Playwright driver did not close cleanly: {}", it.message) }
+    }
+
+    // Tabs and service workers show what Chrome was busy with when an operation failed.
+    private fun logTargets() {
+        val request = HttpRequest.newBuilder(URI("$CDP_ENDPOINT/json/list"))
+            .timeout(TARGETS_TIMEOUT)
+            .GET()
+            .build()
+        val targets = try {
+            targetsClient.send(request, HttpResponse.BodyHandlers.ofString()).body()
+        } catch (error: Exception) {
+            if (error is InterruptedException) Thread.currentThread().interrupt()
+            logger.warn("Chrome targets are unavailable: {}", error.toString())
+            return
+        }
+        val summary = TARGET_REGEX.findAll(targets).joinToString(separator = "; ") { match ->
+            val type = TYPE_REGEX.find(match.value)?.groupValues?.get(1)
+            val targetUrl = URL_REGEX.find(match.value)?.groupValues?.get(1)?.take(MAX_URL_LENGTH)
+            "$type $targetUrl"
+        }
+        logger.warn("Chrome targets: {}", summary.ifEmpty { "none" })
+    }
+
+    suspend fun resetConnection() = withContext(dispatcher) {
+        closeDriver()
     }
 
     override fun close() {
@@ -136,5 +186,12 @@ class ChromeBrowserClient : AutoCloseable {
 
     private companion object {
         const val CDP_ENDPOINT = "http://127.0.0.1:9222"
+        const val CONNECT_TIMEOUT_MS = 30_000.0
+        const val MAX_URL_LENGTH = 150
+        val TARGETS_TIMEOUT: Duration = Duration.ofSeconds(3)
+        val targetsClient: HttpClient = HttpClient.newBuilder().connectTimeout(TARGETS_TIMEOUT).build()
+        val TARGET_REGEX = Regex("\\{[^{}]*\\}")
+        val TYPE_REGEX = Regex("\"type\"\\s*:\\s*\"([^\"]*)\"")
+        val URL_REGEX = Regex("\"url\"\\s*:\\s*\"([^\"]*)\"")
     }
 }

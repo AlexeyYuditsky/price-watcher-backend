@@ -35,7 +35,7 @@ class OzonPriceParser(
             currency = offer.requiredString("priceCurrency"),
             availability = offer.optionalString("availability"),
             title = product.optionalString("name"),
-            imageUrl = product["image"].findImageUrl()
+            imageUrl = product["image"].findImageUrl()?.let(::normalizeOzonImageUrl)
         )
     }
 

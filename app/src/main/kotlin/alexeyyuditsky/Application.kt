@@ -44,7 +44,7 @@ fun Application.rootModule(config: BackendConfig, database: DatabaseConnection) 
     }
     val priceWatcher = OzonPriceWatcher(
         chromeLauncher = launcher,
-        browserClient = OzonBrowserClient(ChromeBrowserClient(), OzonPriceParser())
+        browserClient = OzonBrowserClient(ChromeBrowserClient(launcher), OzonPriceParser())
     )
     monitor.subscribe(ApplicationStopped) { if (it === this) priceWatcher.close() }
     val authenticator = CallAuthenticator(authService)
