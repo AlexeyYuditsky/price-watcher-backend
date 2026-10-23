@@ -6,6 +6,7 @@ import com.microsoft.playwright.Page
 import com.microsoft.playwright.Playwright
 import com.microsoft.playwright.PlaywrightException
 import com.microsoft.playwright.Response
+import com.microsoft.playwright.options.Cookie
 import com.microsoft.playwright.options.WaitUntilState
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.asCoroutineDispatcher
@@ -34,6 +35,7 @@ class ChromeBrowserClient(private val chromeLauncher: ChromeLauncher) : AutoClos
 
     suspend fun loadPage(
         url: String,
+        cookies: List<BrowserCookie> = emptyList(),
         isFailure: (BrowserPage) -> Boolean = { false },
         isReady: (String, String) -> Boolean
     ): BrowserPage = withContext(dispatcher) {
@@ -47,6 +49,16 @@ class ChromeBrowserClient(private val chromeLauncher: ChromeLauncher) : AutoClos
                 }
             val context = connectedBrowser.contexts().firstOrNull()
                 ?: error("Chrome did not provide a browser context")
+            // Set on every load: session cookies are gone after Chrome restarts and sites may reset them.
+            if (cookies.isNotEmpty()) {
+                context.addCookies(
+                    cookies.map { cookie ->
+                        Cookie(cookie.name, cookie.value)
+                            .setDomain(cookie.domain)
+                            .setPath(cookie.path)
+                    }
+                )
+            }
             val productPage = page?.takeUnless { it.isClosed }
                 ?: (context.pages().firstOrNull {
                     it.url() in setOf("about:blank", "chrome://newtab/", "chrome://new-tab-page/")
